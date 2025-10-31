@@ -23,8 +23,9 @@ OTP_FILE = "otp_codes.json"
 AUDIT_FILE = "audit_log.csv"
 FORM_FILE = "insurance_data.csv"
 
+
 # ==========================================================
-# ----------------- PASSWORD HASHING (SHA256) ---------------
+# ---------------- SHA256 PASSWORD HASHING ------------------
 # ==========================================================
 
 def hash_password(pwd):
@@ -33,41 +34,32 @@ def hash_password(pwd):
 def verify_password(input_password, stored_hash):
     return hash_password(input_password) == stored_hash
 
+
 # ==========================================================
 # ---------------------- INIT FILES -------------------------
 # ==========================================================
 
 def init_files():
-    # Setup default users if file missing
     if not os.path.exists(USER_FILE):
         users = {
             "admin": {
                 "password": hash_password("admin123"),
                 "role": "Admin"
-            },
-            "staff": {
-                "password": hash_password("staff123"),
-                "role": "Staff"
-            },
-            "viewer": {
-                "password": hash_password("viewer123"),
-                "role": "Viewer"
             }
         }
         with open(USER_FILE, "w") as f:
             json.dump(users, f, indent=4)
 
-    # OTP store
     if not os.path.exists(OTP_FILE):
         with open(OTP_FILE, "w") as f:
             json.dump({}, f)
 
-    # Audit log
     if not os.path.exists(AUDIT_FILE):
         df = pd.DataFrame(columns=["Timestamp", "Username", "Role", "Action"])
         df.to_csv(AUDIT_FILE, index=False)
 
 init_files()
+
 
 # ==========================================================
 # ---------------------- HELPERS ----------------------------
@@ -81,29 +73,24 @@ def save_users(users):
     with open(USER_FILE, "w") as f:
         json.dump(users, f, indent=4)
 
-def log_action(username, role, action):
-    df = pd.DataFrame([[datetime.now(), username, role, action]],
-                      columns=["Timestamp", "Username", "Role", "Action"])
-    df.to_csv(AUDIT_FILE, mode="a", header=False, index=False)
-
 def generate_otp(username):
     otp = str(random.randint(100000, 999999))
     with open(OTP_FILE, "r") as f:
-        otps = json.load(f)
-    otps[username] = otp
+        otp_data = json.load(f)
+    otp_data[username] = otp
     with open(OTP_FILE, "w") as f:
-        json.dump(otps, f)
-    return otp  # Shown as simulated “email”
+        json.dump(otp_data, f)
+    return otp
 
 def verify_otp(username, otp_input):
     with open(OTP_FILE, "r") as f:
-        otps = json.load(f)
-    return otps.get(username, None) == otp_input
+        otp_data = json.load(f)
+    return otp_data.get(username, None) == otp_input
 
-def load_form_data():
-    if os.path.exists(FORM_FILE):
-        return pd.read_csv(FORM_FILE)
-    return pd.DataFrame()
+def log_action(username, role, action):
+    df = pd.DataFrame([[datetime.now(), username, role, action]],
+                      columns=["Timestamp", "Username", "Role", "Action"])
+    df.to_csv(AUDIT_FILE, mode='a', header=False, index=False)
 
 def save_form(entry):
     df_new = pd.DataFrame([entry])
@@ -112,79 +99,121 @@ def save_form(entry):
     else:
         df_new.to_csv(FORM_FILE, index=False)
 
+def load_form_data():
+    if os.path.exists(FORM_FILE):
+        return pd.read_csv(FORM_FILE)
+    return pd.DataFrame()
+
+
 # ==========================================================
-# ---------------------- SESSION VARS -----------------------
+# ----------------------- SESSION ---------------------------
 # ==========================================================
+
+if "page" not in st.session_state:
+    st.session_state.page = "login"
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
-if "role" not in st.session_state:
-    st.session_state.role = None
-if "username" not in st.session_state:
-    st.session_state.username = None
+
 if "otp_sent" not in st.session_state:
     st.session_state.otp_sent = False
 
-# ==========================================================
-# ---------------------- MAIN MENU --------------------------
-# ==========================================================
-
-st.title("🔐 Multi-User Insurance Automation System")
-
-menu = st.sidebar.selectbox("Menu", ["📝 Fill Form", "🔐 Login", "📊 Dashboard"])
 
 # ==========================================================
 # ---------------------- LOGIN PAGE -------------------------
 # ==========================================================
 
-if menu == "🔐 Login":
-    st.header("User Login (OTP Protected)")
+def login_page():
+    st.title("🔐 Insurance System Login")
+
+    st.write("If you don't have an account, create one below.")
 
     users = load_users()
+
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
-    if st.button("Send OTP"):
-        if username in users:
-            stored_hash = users[username]["password"]
-            if verify_password(password, stored_hash):
+    col1, col2 = st.columns(2)
+
+    # ----------- Login button -----------
+    with col1:
+        if st.button("Send OTP"):
+            if username in users and verify_password(password, users[username]["password"]):
                 otp = generate_otp(username)
                 st.session_state.otp_sent = True
-                st.success(f"✅ OTP sent (SIMULATED): **{otp}**")
+                st.success(f"✅ OTP sent (Simulated): **{otp}**")
             else:
-                st.error("❌ Incorrect password")
-        else:
-            st.error("❌ User not found")
+                st.error("❌ Invalid username or password")
 
+    # ----------- Create Account ----------
+    with col2:
+        if st.button("Create Account"):
+            st.session_state.page = "register"
+
+    # ----------- OTP Verification --------
     if st.session_state.otp_sent:
         otp_input = st.text_input("Enter OTP")
+
         if st.button("Login"):
             if verify_otp(username, otp_input):
                 st.session_state.logged_in = True
                 st.session_state.username = username
                 st.session_state.role = users[username]["role"]
-                log_action(username, st.session_state.role, "Logged in")
-                st.success(f"✅ Login successful! Welcome **{username}**")
+                log_action(username, st.session_state.role, "Logged In")
+                st.session_state.page = "form"
+                st.success("✅ Login successful!")
             else:
                 st.error("❌ Invalid OTP")
 
+
 # ==========================================================
-# ---------------------- INSURANCE FORM ---------------------
+# -------------------- REGISTRATION PAGE --------------------
 # ==========================================================
 
-if menu == "📝 Fill Form":
-    st.header("Insurance Form")
+def register_page():
+    st.title("🆕 Create New Account")
+
+    new_user = st.text_input("Choose a Username")
+    new_pass = st.text_input("Choose a Password", type="password")
+    new_role = st.selectbox("Select Role", ["Viewer", "Staff"])
+
+    if st.button("Create Account"):
+        users = load_users()
+        if new_user in users:
+            st.error("❌ Username already exists")
+        else:
+            users[new_user] = {
+                "password": hash_password(new_pass),
+                "role": new_role
+            }
+            save_users(users)
+            st.success("✅ Account created successfully! Please login.")
+            st.session_state.page = "login"
+
+
+# ==========================================================
+# ---------------------- FORM PAGE --------------------------
+# ==========================================================
+
+def form_page():
+    st.title("📝 Insurance Form")
+
+    if not st.session_state.logged_in:
+        st.warning("Please login first.")
+        st.session_state.page = "login"
+        return
+
+    st.write("Fill the details below:")
 
     name = st.text_input("Name")
     gender = st.selectbox("Gender", ["Male", "Female", "Other"])
     age = st.number_input("Age", 0, 120)
     contact = st.text_input("Contact Number")
     dob = st.date_input("Date of Birth")
-
     hospital = st.text_input("Hospital Name")
     policy = st.text_input("Policy Number")
 
-    if st.button("Submit Form"):
+    if st.button("Submit"):
         entry = {
             "Timestamp": datetime.now(),
             "Name": name,
@@ -196,74 +225,81 @@ if menu == "📝 Fill Form":
             "Policy": policy
         }
         save_form(entry)
+        log_action(st.session_state.username, st.session_state.role, "Submitted Form")
+        st.success("✅ Form Submitted Successfully!")
 
-        if st.session_state.logged_in:
-            log_action(st.session_state.username, st.session_state.role, "Submitted Form")
 
-        st.success("✅ Form submitted successfully!")
+    if st.button("Go to Dashboard"):
+        st.session_state.page = "dashboard"
+
 
 # ==========================================================
 # ---------------------- DASHBOARD --------------------------
 # ==========================================================
 
-if menu == "📊 Dashboard":
+def dashboard_page():
 
     if not st.session_state.logged_in:
-        st.warning("🔐 Please login to access the dashboard")
-        st.stop()
+        st.warning("Please login first.")
+        st.session_state.page = "login"
+        return
 
+    st.title("📊 Dashboard")
     role = st.session_state.role
-    username = st.session_state.username
-
-    st.header(f"📊 Dashboard ({role})")
-    log_action(username, role, "Opened Dashboard")
 
     df = load_form_data()
 
-    # -------- Viewer (Read-only) --------
     if role == "Viewer":
         st.subheader("Read-Only Records")
         st.dataframe(df)
 
-    # -------- Staff (Filter + view only) --------
     if role == "Staff":
-        st.subheader("Staff Access")
-        name_filter = st.text_input("Filter by Name")
-        filtered = df[df["Name"].str.contains(name_filter, case=False)] if name_filter else df
+        st.subheader("Filter Records")
+        filter_name = st.text_input("Filter by name")
+        filtered = df[df["Name"].str.contains(filter_name, case=False)] if filter_name else df
         st.dataframe(filtered)
 
-    # -------- Admin (Full Access) --------
     if role == "Admin":
-        st.subheader("Admin Panel: Full Access")
+        st.subheader("All Records")
         st.dataframe(df)
 
-        st.subheader("👤 Audit Log")
+        st.subheader("Audit Log")
         audit = pd.read_csv(AUDIT_FILE)
         st.dataframe(audit)
 
-        # Add new user
-        st.subheader("➕ Add New User")
-        new_user = st.text_input("New Username")
-        new_pass = st.text_input("New Password", type="password")
+        st.subheader("Add User")
+        new_user = st.text_input("Username")
+        new_pass = st.text_input("Password", type="password")
         new_role = st.selectbox("Role", ["Admin", "Staff", "Viewer"])
 
         if st.button("Create User"):
             users = load_users()
             if new_user in users:
-                st.error("❌ Username already exists")
+                st.error("User already exists")
             else:
-                users[new_user] = {
-                    "password": hash_password(new_pass),
-                    "role": new_role
-                }
+                users[new_user] = {"password": hash_password(new_pass), "role": new_role}
                 save_users(users)
-                log_action(username, role, f"Created user: {new_user}")
-                st.success("✅ User created successfully!")
+                st.success("User created")
 
-    # Logout button
     if st.button("Logout"):
-        log_action(username, role, "Logged out")
         st.session_state.logged_in = False
-        st.session_state.username = None
-        st.session_state.role = None
-        st.success("✅ Successfully logged out")
+        st.session_state.page = "login"
+        st.success("Logged out!")
+
+
+# ==========================================================
+# ---------------------- PAGE CONTROLLER --------------------
+# ==========================================================
+
+if st.session_state.page == "login":
+    login_page()
+
+elif st.session_state.page == "register":
+    register_page()
+
+elif st.session_state.page == "form":
+    form_page()
+
+elif st.session_state.page == "dashboard":
+    dashboard_page()
+
